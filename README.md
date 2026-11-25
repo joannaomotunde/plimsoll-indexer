@@ -143,14 +143,10 @@ plimsoll-indexer healthcheck
 
 ## Deploying
 
-[render.yaml](render.yaml) defines a Render web service plus a Postgres
-database in the same region, connected over the internal URL. Set
-`SUPPLY_POSTER_SECRET` in the Render dashboard; it is never committed.
-
-On Render the indexer requests its own `/healthz` every 10 minutes
-(`KEEP_AWAKE_URL`, derived from `RENDER_EXTERNAL_URL`), so the free tier does
-not put it to sleep and supply posting keeps running. One always-on service
-uses about 744 of the free tier's 750 monthly instance hours.
+[Deployment guide](docs/deploy.md) covers Docker, required configuration,
+Postgres provisioning, Render and Railway setup, and safe secret management.
+The [Render blueprint](render.yaml) provisions a web service and Postgres
+database and can be launched with the one-click button in the guide.
 
 [.github/workflows/keepalive.yml](.github/workflows/keepalive.yml) watches the
 deployment from outside: it wakes the service, fails if nothing has been
