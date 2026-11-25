@@ -87,6 +87,9 @@ type Config struct {
 	// PosterLowBalanceStroops is the XLM balance (in stroops) below which the
 	// poster logs a warning on every tick. Zero disables the check.
 	PosterLowBalanceStroops int64
+	// ReporterStaleThreshold is how old a reporter's latest report may be
+	// before ingestion logs a warning. Zero disables the check.
+	ReporterStaleThreshold time.Duration
 }
 
 // Load reads the environment. Missing required values are reported together.
@@ -155,6 +158,7 @@ func Load() (Config, error) {
 		{"REPOST_AFTER", "6h", &c.RepostAfter},
 		{"TOML_INTERVAL", "6h", &c.TomlInterval},
 		{"KEEP_AWAKE_INTERVAL", "10m", &c.KeepAwakeInterval},
+		{"REPORTER_STALE_THRESHOLD", "720h", &c.ReporterStaleThreshold},
 	}
 	for _, d := range durations {
 		v, err := time.ParseDuration(envOr(d.name, d.def))
@@ -163,6 +167,9 @@ func Load() (Config, error) {
 			continue
 		}
 		*d.dst = v
+	}
+	if c.ReporterStaleThreshold < 0 {
+		errs = append(errs, errors.New("REPORTER_STALE_THRESHOLD must not be negative"))
 	}
 
 	for _, o := range strings.Split(envOr("CORS_ORIGINS", "*"), ",") {

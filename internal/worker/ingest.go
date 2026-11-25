@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	protocol "github.com/stellar/go-stellar-sdk/protocols/rpc"
 
@@ -28,15 +29,17 @@ type eventSource interface {
 type eventStore interface {
 	Progress(ctx context.Context, name string) (store.Progress, error)
 	ApplyEvents(ctx context.Context, name, cursor string, ledger uint32, events []any) error
+	LatestReporterReports(ctx context.Context) ([]store.ReporterLatestReport, error)
 }
 
 // Ingester copies Plimsoll contract events from RPC into Postgres.
 type Ingester struct {
-	RPC         eventSource
-	Store       eventStore
-	ContractIDs []string
-	StartLedger uint32
-	Log         *slog.Logger
+	RPC                    eventSource
+	Store                  eventStore
+	ContractIDs            []string
+	StartLedger            uint32
+	ReporterStaleThreshold time.Duration
+	Log                    *slog.Logger
 }
 
 // Run pulls every available page once. Call it on a ticker.
@@ -99,9 +102,31 @@ func (in *Ingester) Run(ctx context.Context) error {
 		}
 		cursor = resp.Cursor
 		if len(resp.Events) < pageLimit {
-			return nil
+			return in.checkStaleReporters(ctx)
 		}
 	}
+}
+
+func (in *Ingester) checkStaleReporters(ctx context.Context) error {
+	if in.ReporterStaleThreshold == 0 {
+		return nil
+	}
+	reports, err := in.Store.LatestReporterReports(ctx)
+	if err != nil {
+		return fmt.Errorf("check stale reporters: %w", err)
+	}
+	now := time.Now()
+	for _, report := range reports {
+		age := now.Sub(report.AsOf)
+		if age > in.ReporterStaleThreshold {
+			in.Log.Warn("reporter report is stale",
+				"reporter", report.Reporter,
+				"age", age.Round(time.Second).String(),
+				"report_as_of", report.AsOf.UTC(),
+				"threshold", in.ReporterStaleThreshold.String())
+		}
+	}
+	return nil
 }
 
 // outsideRetention reports whether RPC refused the request because the ledger

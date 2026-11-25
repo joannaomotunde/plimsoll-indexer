@@ -36,6 +36,7 @@ values are reported together at startup.
 | `STELLAR_NETWORK_PASSPHRASE` | preset | Must match the network, or signed posts are rejected. |
 | `HORIZON_CHECK_URL` | empty | Second, independently operated Horizon. Empty disables the cross-check. |
 | `START_LEDGER` | `0` | First ledger to ingest. `0` or a ledger in the future means "latest"; older than RPC retention is clamped. |
+| `REPORTER_STALE_THRESHOLD` | `720h` | Warn once per ingest cycle when an active reporter's newest report `as_of` is older than this duration. `0` disables the check. |
 | `SUPPLY_POSTER_SECRET` | empty | Empty runs read-only. Never log or share it. |
 | `WEBHOOK_ADMIN_TOKEN` | empty | Enables authenticated webhook management when set with `WEBHOOK_ENCRYPTION_KEY`. |
 | `WEBHOOK_ENCRYPTION_KEY` | empty | Base64-encoded 32-byte key (`openssl rand -base64 32`); keep stable to preserve webhook delivery. |
@@ -112,6 +113,7 @@ Logs are JSON (`log/slog`). Key messages:
 | warn | `supply not cross-checked: horizons are at different ledgers` | Ledger skew after a retry. Posting continues. Frequent occurrences mean the two Horizons lag each other. |
 | warn | `ingest cursor is older than RPC retention...` | Ingestion was down longer than RPC's ~7 days. Events in the gap are gone from RPC; the reconciler repairs the latest state. |
 | warn | `start ledger is outside RPC retention` | `START_LEDGER` is too old and was clamped. |
+| warn | `reporter report is stale` (`reporter`, `age`) | An active reporter's latest report date is older than `REPORTER_STALE_THRESHOLD`. |
 | warn | `recovered a supply snapshot / reserve report from contract state...` | The reconciler filled a gap. Rows are marked `"source": "chain"` with no `tx_hash`. |
 | info | `supply posting disabled (SUPPLY_POSTER_SECRET not set)` | Expected on read-only instances. |
 | info | `supply cross-check disabled (HORIZON_CHECK_URL not set)` | The poster signs on one Horizon's word. |

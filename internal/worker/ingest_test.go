@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	protocol "github.com/stellar/go-stellar-sdk/protocols/rpc"
 	"github.com/stellar/go-stellar-sdk/xdr"
@@ -168,10 +169,13 @@ func (f *fakeRPC) GetLatestLedger(context.Context) (protocol.GetLatestLedgerResp
 }
 
 type fakeStore struct {
-	progress store.Progress
-	applied  [][]any
-	cursors  []string
-	ledgers  []uint32
+	progress     store.Progress
+	applied      [][]any
+	cursors      []string
+	ledgers      []uint32
+	reports      []store.ReporterLatestReport
+	reportErr    error
+	reportChecks int
 }
 
 func (f *fakeStore) Progress(context.Context, string) (store.Progress, error) {
@@ -185,13 +189,65 @@ func (f *fakeStore) ApplyEvents(_ context.Context, _, cursor string, ledger uint
 	return nil
 }
 
+func (f *fakeStore) LatestReporterReports(context.Context) ([]store.ReporterLatestReport, error) {
+	f.reportChecks++
+	return f.reports, f.reportErr
+}
+
 func newIngester(rpc *fakeRPC, db *fakeStore) *Ingester {
 	return &Ingester{
-		RPC:         rpc,
-		Store:       db,
-		ContractIDs: []string{"CC2QQ7R4FLPHZP7KA5AO4IASXXICTG6N4GQXCXITTEBNYQEYTYXKMN4D"},
-		StartLedger: 5034380,
-		Log:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		RPC:                    rpc,
+		Store:                  db,
+		ContractIDs:            []string{"CC2QQ7R4FLPHZP7KA5AO4IASXXICTG6N4GQXCXITTEBNYQEYTYXKMN4D"},
+		StartLedger:            5034380,
+		ReporterStaleThreshold: 30 * 24 * time.Hour,
+		Log:                    slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+}
+
+func TestRunWarnsForStaleReporterOncePerCycle(t *testing.T) {
+	db := &fakeStore{reports: []store.ReporterLatestReport{
+		{Reporter: "GSTALE", AsOf: time.Now().Add(-48 * time.Hour)},
+		{Reporter: "GFRESH", AsOf: time.Now().Add(-time.Hour)},
+	}}
+	var logs strings.Builder
+	in := newIngester(&fakeRPC{latest: 100}, db)
+	in.ReporterStaleThreshold = 24 * time.Hour
+	in.Log = slog.New(slog.NewJSONHandler(&logs, nil))
+
+	if err := in.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if db.reportChecks != 1 {
+		t.Fatalf("stale reporter check called %d times, want once", db.reportChecks)
+	}
+	if !strings.Contains(logs.String(), `"reporter":"GSTALE"`) ||
+		!strings.Contains(logs.String(), `"age":"48h`) {
+		t.Errorf("stale report warning lacks reporter or age: %s", logs.String())
+	}
+	if strings.Contains(logs.String(), `"reporter":"GFRESH"`) {
+		t.Errorf("fresh reporter unexpectedly warned: %s", logs.String())
+	}
+}
+
+func TestRunSurfacesStaleReporterCheckError(t *testing.T) {
+	db := &fakeStore{reportErr: errors.New("database unavailable")}
+	in := newIngester(&fakeRPC{latest: 100}, db)
+	err := in.Run(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "database unavailable") {
+		t.Fatalf("want stale reporter query error, got %v", err)
+	}
+}
+
+func TestRunSkipsStaleReporterCheckWhenDisabled(t *testing.T) {
+	db := &fakeStore{}
+	in := newIngester(&fakeRPC{latest: 100}, db)
+	in.ReporterStaleThreshold = 0
+	if err := in.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if db.reportChecks != 0 {
+		t.Errorf("stale reporter check called %d times, want none when disabled", db.reportChecks)
 	}
 }
 

@@ -157,6 +157,9 @@ func TestLoadDefaults(t *testing.T) {
 	if got.KeepAwakeInterval.String() != "10m0s" {
 		t.Errorf("KeepAwakeInterval = %v, want 10m0s", got.KeepAwakeInterval)
 	}
+	if got.ReporterStaleThreshold.String() != "720h0m0s" {
+		t.Errorf("ReporterStaleThreshold = %v, want 720h0m0s", got.ReporterStaleThreshold)
+	}
 }
 
 // TestLoadRequiredMissing checks that each required variable produces an error
@@ -213,6 +216,7 @@ func TestLoadBadDurations(t *testing.T) {
 		"REPOST_AFTER",
 		"TOML_INTERVAL",
 		"KEEP_AWAKE_INTERVAL",
+		"REPORTER_STALE_THRESHOLD",
 	}
 	for _, v := range durationVars {
 		t.Run(v, func(t *testing.T) {
@@ -226,6 +230,32 @@ func TestLoadBadDurations(t *testing.T) {
 				t.Errorf("error = %q, want it to mention %q", err.Error(), v)
 			}
 		})
+	}
+}
+
+func TestReporterStaleThresholdConfiguration(t *testing.T) {
+	setBase(t)
+	t.Setenv("REPORTER_STALE_THRESHOLD", "48h")
+	got, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ReporterStaleThreshold.String() != "48h0m0s" {
+		t.Errorf("ReporterStaleThreshold = %v, want 48h0m0s", got.ReporterStaleThreshold)
+	}
+
+	t.Setenv("REPORTER_STALE_THRESHOLD", "0")
+	got, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ReporterStaleThreshold != 0 {
+		t.Errorf("ReporterStaleThreshold = %v, want 0", got.ReporterStaleThreshold)
+	}
+
+	t.Setenv("REPORTER_STALE_THRESHOLD", "-1h")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "must not be negative") {
+		t.Fatalf("want negative threshold error, got %v", err)
 	}
 }
 
