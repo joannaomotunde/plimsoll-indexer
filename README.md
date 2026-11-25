@@ -71,6 +71,10 @@ The command fetches the asset's snapshot breakdown from the indexer, verifies th
 Webhook registration and signature verification are covered in the
 [webhook guide](docs/webhooks.md).
 
+Create a one-time API key with `go run ./cmd/plimsoll-indexer keygen` (requires
+`DATABASE_URL`). The key is stored as a bcrypt hash; save the printed value
+securely because it cannot be retrieved later.
+
 Coverage in the API uses the same selection and rounding rules as the contract
 (`internal/coverage`), so the API and `coverage()` on-chain agree.
 

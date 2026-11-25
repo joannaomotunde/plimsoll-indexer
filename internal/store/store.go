@@ -6,10 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/plimsoll-protocol/plimsoll-indexer/internal/coverage"
 	"github.com/plimsoll-protocol/plimsoll-indexer/internal/soroban"
@@ -423,6 +426,45 @@ func (s *Store) DeleteWebhook(ctx context.Context, id int64) (bool, error) {
 		return false, fmt.Errorf("delete webhook: %w", err)
 	}
 	return tag.RowsAffected() != 0, nil
+}
+
+// CreateAPIKey stores a bcrypt hash and returns the selector used to locate it.
+func (s *Store) CreateAPIKey(ctx context.Context, keyHash string) (int64, error) {
+	var id int64
+	err := s.pool.QueryRow(ctx,
+		`INSERT INTO api_keys (key_hash) VALUES ($1) RETURNING id`, keyHash,
+	).Scan(&id)
+	if err != nil {
+		return 0, fmt.Errorf("create API key: %w", err)
+	}
+	return id, nil
+}
+
+// ValidateAPIKey checks the secret portion of an id.secret API key.
+func (s *Store) ValidateAPIKey(ctx context.Context, key string) (bool, error) {
+	id, secret, ok := strings.Cut(key, ".")
+	if !ok || id == "" || secret == "" || strings.Contains(secret, ".") || len(secret) > 72 {
+		return false, nil
+	}
+	var keyID int64
+	keyID, err := strconv.ParseInt(id, 10, 64)
+	if err != nil || keyID < 1 {
+		return false, nil
+	}
+	var hash string
+	if err := s.pool.QueryRow(ctx, `SELECT key_hash FROM api_keys WHERE id = $1`, keyID).Scan(&hash); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("read API key: %w", err)
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(secret)); err != nil {
+		if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
+			return false, nil
+		}
+		return false, fmt.Errorf("compare API key: %w", err)
+	}
+	return true, nil
 }
 
 func mustBig(s string) *big.Int {

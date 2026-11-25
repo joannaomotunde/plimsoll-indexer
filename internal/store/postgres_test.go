@@ -15,6 +15,7 @@ import (
 	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // The store tests run against a real Postgres: embedded-postgres downloads the
@@ -212,5 +213,41 @@ func TestWebhookPersistence(t *testing.T) {
 	deleted, err = s.DeleteWebhook(ctx, created.ID)
 	if err != nil || deleted {
 		t.Fatalf("delete missing webhook: deleted=%v err=%v", deleted, err)
+	}
+}
+
+func TestAPIKeyPersistenceAndValidation(t *testing.T) {
+	s, _ := openStore(t)
+	ctx := context.Background()
+	secret := "a-generated-secret"
+	hash, err := bcrypt.GenerateFromPassword([]byte(secret), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := s.CreateAPIKey(ctx, string(hash))
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := fmt.Sprintf("%d.%s", id, secret)
+	for _, test := range []struct {
+		key  string
+		want bool
+	}{
+		{key: key, want: true},
+		{key: fmt.Sprintf("%d.wrong", id), want: false},
+		{key: "999999.missing", want: false},
+		{key: "not-an-api-key", want: false},
+	} {
+		valid, err := s.ValidateAPIKey(ctx, test.key)
+		if err != nil || valid != test.want {
+			t.Errorf("ValidateAPIKey(%q) = %v, %v; want %v", test.key, valid, err, test.want)
+		}
+	}
+	var stored string
+	if err := s.pool.QueryRow(ctx, `SELECT key_hash FROM api_keys WHERE id = $1`, id).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored == secret || bcrypt.CompareHashAndPassword([]byte(stored), []byte(secret)) != nil {
+		t.Fatal("API key was not stored as a valid bcrypt hash")
 	}
 }
