@@ -91,8 +91,9 @@ type supplyJSON struct {
 }
 
 type reportJSON struct {
-	Tier   string `json:"tier"`
-	Amount string `json:"amount"`
+	Tier     string  `json:"tier"`
+	Amount   string  `json:"amount"`
+	DocCheck *string `json:"doc_check"`
 	coverage.Report
 }
 
@@ -114,10 +115,12 @@ type coverageJSON struct {
 
 type assetJSON struct {
 	coverage.Asset
-	Toml     json.RawMessage        `json:"toml"`
-	Supply   *supplyJSON            `json:"supply"`
-	Reports  map[string]*reportJSON `json:"reports"`
-	Coverage *coverageJSON          `json:"coverage"`
+	Toml          json.RawMessage        `json:"toml"`
+	TomlCheckedAt *time.Time             `json:"toml_checked_at"`
+	TomlError     *string                `json:"toml_error"`
+	Supply        *supplyJSON            `json:"supply"`
+	Reports       map[string]*reportJSON `json:"reports"`
+	Coverage      *coverageJSON          `json:"coverage"`
 }
 
 type reporterJSON struct {
@@ -144,7 +147,11 @@ func toSupply(sp *coverage.Supply) *supplyJSON {
 }
 
 func toReport(r coverage.Report) *reportJSON {
-	return &reportJSON{Tier: coverage.TierName(r.Tier), Amount: r.Amount.String(), Report: r}
+	out := &reportJSON{Tier: coverage.TierName(r.Tier), Amount: r.Amount.String(), Report: r}
+	if r.DocCheck != "" {
+		out.DocCheck = &r.DocCheck
+	}
+	return out
 }
 
 func (s *Server) toCoverage(r *coverage.Result) *coverageJSON {
@@ -188,9 +195,11 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body := map[string]any{
-		"status":             "ok",
-		"ingested_to_ledger": p.ScannedLedger,
-		"last_event_ledger":  p.EventLedger,
+		"status":                 "ok",
+		"ingested_to_ledger":     p.ScannedLedger,
+		"last_event_ledger":      p.EventLedger,
+		"last_event_at":          nil,
+		"last_event_age_seconds": nil,
 	}
 	// A scan that keeps advancing while no event lands is how ingestion failed
 	// silently before, so say when an event was last written and let callers
@@ -270,11 +279,15 @@ func (s *Server) assemble(ctx context.Context, a coverage.Asset, minTier uint32)
 		return assetJSON{}, err
 	}
 	out := assetJSON{
-		Asset:    a,
-		Toml:     json.RawMessage("null"),
-		Supply:   toSupply(sp),
-		Reports:  map[string]*reportJSON{},
-		Coverage: s.toCoverage(coverage.Compute(sp, reports, minTier)),
+		Asset:         a,
+		Toml:          json.RawMessage("null"),
+		TomlCheckedAt: a.TomlCheckedAt,
+		Supply:        toSupply(sp),
+		Reports:       map[string]*reportJSON{},
+		Coverage:      s.toCoverage(coverage.Compute(sp, reports, minTier)),
+	}
+	if a.TomlError != "" {
+		out.TomlError = &a.TomlError
 	}
 	if len(a.Toml) > 0 {
 		out.Toml = a.Toml

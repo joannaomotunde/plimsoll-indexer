@@ -40,10 +40,11 @@ func unlistedSAC(t *testing.T) string {
 }
 
 type fake struct {
-	assets  []coverage.Asset
-	supply  map[string]*coverage.Supply
-	reports map[string]map[uint32]coverage.Report
-	bodies  map[string][]byte
+	assets   []coverage.Asset
+	supply   map[string]*coverage.Supply
+	reports  map[string]map[uint32]coverage.Report
+	bodies   map[string][]byte
+	progress *store.Progress
 }
 
 func (f *fake) Ping(context.Context) error { return nil }
@@ -90,6 +91,9 @@ func (f *fake) Breakdown(_ context.Context, h string) ([]byte, error) {
 	return nil, store.ErrNotFound
 }
 func (f *fake) Progress(context.Context, string) (store.Progress, error) {
+	if f.progress != nil {
+		return *f.progress, nil
+	}
 	return store.Progress{
 		Cursor:        "c",
 		ScannedLedger: 42,
@@ -174,6 +178,16 @@ func TestGetAssetCoverage(t *testing.T) {
 	srv := server()
 	defer srv.Close()
 	body := get(t, srv, "/v1/assets/"+sac, 200)
+	for _, field := range []string{"toml", "toml_checked_at", "toml_error"} {
+		value, ok := body[field]
+		if !ok || value != nil {
+			t.Errorf("%s = %v (present: %t), want null", field, value, ok)
+		}
+	}
+	report := body["reports"].(map[string]any)["issuer_signed"].(map[string]any)
+	if value, ok := report["doc_check"]; !ok || value != nil {
+		t.Errorf("doc_check = %v (present: %t), want null", value, ok)
+	}
 	cov := body["coverage"].(map[string]any)
 	if cov["bps"].(float64) != 10_200 || cov["ratio"] != "102.00%" || cov["tier"] != "issuer_signed" {
 		t.Fatalf("coverage %+v", cov)
@@ -186,11 +200,29 @@ func TestGetAssetCoverage(t *testing.T) {
 	}
 }
 
+func TestHealthUnknownEventFieldsAreNull(t *testing.T) {
+	f := &fake{progress: &store.Progress{Cursor: "c", ScannedLedger: 42}}
+	srv := httptest.NewServer((&Server{
+		Store: f,
+		Log:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Now:   func() time.Time { return now },
+	}).Handler())
+	defer srv.Close()
+
+	body := get(t, srv, "/healthz", 200)
+	for _, field := range []string{"last_event_at", "last_event_age_seconds"} {
+		value, ok := body[field]
+		if !ok || value != nil {
+			t.Errorf("%s = %v (present: %t), want null", field, value, ok)
+		}
+	}
+}
+
 func TestMinTierExcludesWeakerReports(t *testing.T) {
 	srv := server()
 	defer srv.Close()
 	body := get(t, srv, "/v1/assets/"+sac+"?min_tier=3", 200)
-	if body["coverage"] != nil {
+	if value, ok := body["coverage"]; !ok || value != nil {
 		t.Fatalf("expected no coverage at auditor tier, got %+v", body["coverage"])
 	}
 	get(t, srv, "/v1/assets/"+sac+"?min_tier=9", 400)

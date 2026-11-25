@@ -31,9 +31,22 @@ paths:
                   ingested_to_ledger:
                     type: integer
                     example: 42
+                  last_event_ledger:
+                    type: integer
+                    example: 40
+                  last_event_at:
+                    type: [string, "null"]
+                    format: date-time
+                    example: "2026-10-05T11:58:30Z"
+                  last_event_age_seconds:
+                    type: [integer, "null"]
+                    example: 90
                 required:
                   - status
                   - ingested_to_ledger
+                  - last_event_ledger
+                  - last_event_at
+                  - last_event_age_seconds
         '503':
           description: Storage/database is unavailable
           content:
@@ -452,6 +465,10 @@ components:
         tx_hash:
           type: string
           example: "tx456..."
+        doc_check:
+          type: [string, "null"]
+          description: "Document hash check result, or null if not yet checked."
+          enum: [match, mismatch, unreachable, null]
       required:
         - tier
         - amount
@@ -461,6 +478,7 @@ components:
         - doc_hash
         - doc_uri
         - tx_hash
+        - doc_check
     Coverage:
       type: object
       properties:
@@ -503,6 +521,8 @@ components:
           type: string
           example: "https://x"
       required:
+        - bps
+        - ratio
         - tier
         - supply
         - reserves
@@ -557,7 +577,12 @@ components:
         - issuer
         - listed_ledger
         - listed_at
+        - toml
+        - toml_checked_at
+        - toml_error
+        - supply
         - reports
+        - coverage
     Reporter:
       type: object
       properties:
